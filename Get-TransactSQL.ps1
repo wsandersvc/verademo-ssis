@@ -5,6 +5,8 @@ if (-not (Test-Path $OutputFolder)) {
     New-Item -ItemType Directory -Path $OutputFolder | Out-Null
 }
 
+$ExportedFiles = @{}
+$Collisions = @()
 $DtsxFiles = Get-ChildItem -Path $SourceFolder -Filter "*.dtsx" -Recurse
 
 foreach ($File in $DtsxFiles) {
@@ -31,7 +33,31 @@ foreach ($File in $DtsxFiles) {
         }
 
         $TaskName = $Node.ParentNode.ParentNode.Name
-        $FileName = "{0:D3}_{1}.sql" -f $CommandIndex, ($TaskName -replace '[<>:"/\\|?*]', '_')
+        $BaseFileName = "{0:D3}_{1}.sql" -f $CommandIndex, ($TaskName -replace '[<>:"/\\|?*]', '_')
+        $FileKey = $BaseFileName.ToLower()
+        $FileName = $BaseFileName
+
+        if ($ExportedFiles.ContainsKey($FileKey)) {
+            $Collision = @{
+                FileName = $BaseFileName
+                FirstSource = $ExportedFiles[$FileKey]
+                SecondSource = "$PackageName/$BaseFileName"
+            }
+            $Collisions += $Collision
+            Write-Host "WARNING: Duplicate SQL filename detected: '$BaseFileName'" -ForegroundColor Yellow
+            Write-Host "  First:  $($ExportedFiles[$FileKey])" -ForegroundColor Yellow
+            Write-Host "  Appending suffix for: $PackageName" -ForegroundColor Yellow
+
+            $NameWithoutExt = $BaseFileName -replace '\.sql$', ''
+            $Suffix = 2
+            while ($ExportedFiles.ContainsKey("$NameWithoutExt`_$Suffix.sql".ToLower())) {
+                $Suffix++
+            }
+            $FileName = "$NameWithoutExt`_$Suffix.sql"
+            $FileKey = $FileName.ToLower()
+        }
+
+        $ExportedFiles[$FileKey] = "$PackageName/$FileName"
         $FilePath = Join-Path $PackageFolder $FileName
 
         $Header = "-- Package: $PackageName`r`n"
@@ -51,4 +77,9 @@ foreach ($File in $DtsxFiles) {
     }
 }
 
-Write-Host "Extraction complete! Files saved to $OutputFolder" -ForegroundColor Green
+if ($Collisions.Count -gt 0) {
+    Write-Host "`nExtraction complete with WARNINGS!" -ForegroundColor Yellow
+    Write-Host "$($Collisions.Count) collision(s) detected and renamed" -ForegroundColor Yellow
+} else {
+    Write-Host "`nExtraction complete! Files saved to $OutputFolder" -ForegroundColor Green
+}
